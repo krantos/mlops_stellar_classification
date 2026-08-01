@@ -1,4 +1,3 @@
-# Ejemplo de ambiente productivo
 ### MLOps1 - CEIA - FIUBA
 Estructura de servicios para la implementación del proyecto final de MLOps1 - CEIA - FIUBA
 
