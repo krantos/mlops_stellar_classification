@@ -87,15 +87,21 @@ def etl_process():
        task_id="feature_engineering_and_encoding",
        requirements=[
           "pandas",
-          "awswrangler==3.6.0"
+          "awswrangler==3.6.0",
+          "boto3",
+          "scikit-learn"
        ]
     )
     def feature_engineering_and_encoding():
       """
-        Feature engineering step
+        Build the color indices and encode the target with LabelEncoder.
+        The class mapping is stored in S3 so inference can map codes back to labels.
       """
-      import pandas as pd
+      import json
+
       import awswrangler as wr
+      import boto3
+      from sklearn.preprocessing import LabelEncoder
 
       s3_path = "s3://data/clean/stellar_classification.csv"
       df = wr.s3.read_csv(path=s3_path)
@@ -103,11 +109,97 @@ def etl_process():
       df["g_r"] = df["g"] - df["r"]
       df["r_i"] = df["r"] - df["i"]
       df["i_z"] = df["i"] - df["z"]
+
+      le = LabelEncoder()
+      df["class"] = le.fit_transform(df["class"])
+      class_mapping = {int(code): str(name) for code, name in enumerate(le.classes_)}
+      print(f"Mapeo de clases: {class_mapping}")
+
       s3_feature = "s3://data/features/stellar_classification.csv"
       wr.s3.to_csv(df=df, path=s3_feature, index=False)
       print(f"Dataset con features guardado en S3 {s3_feature}")
 
-    get_data() >> clean_data() >> feature_engineering_and_encoding()
+      boto3.client("s3").put_object(
+        Bucket="data",
+        Key="metadata/class_mapping.json",
+        Body=json.dumps(class_mapping, indent=2).encode("utf-8"),
+        ContentType="application/json"
+      )
+      print("Mapeo de clases guardado en S3 s3://data/metadata/class_mapping.json")
+
+
+    @task.virtualenv(
+       task_id="split_dataset",
+       requirements=[
+          "pandas",
+          "awswrangler==3.6.0",
+          "boto3",
+          "scikit-learn"
+       ]
+    )
+    def split_dataset():
+      """
+        Single stratified 80/20 split, reused by every model so the comparison stays fair.
+      """
+      import json
+
+      import awswrangler as wr
+      import boto3
+      from sklearn.model_selection import train_test_split
+
+      SEED = 42
+      TEST_SIZE = 0.20
+
+      s3_feature = "s3://data/features/stellar_classification.csv"
+      df = wr.s3.read_csv(path=s3_feature)
+
+      mags = ["u", "g", "r", "i", "z"]
+      colors = ["u_g", "g_r", "r_i", "i_z"]
+      coords = ["alpha", "delta"]
+      feature_sets = {
+        "with_z": mags + colors + coords + ["redshift"],
+        "without_z": mags + colors + coords,
+      }
+
+      X = df[feature_sets["with_z"]]
+      y = df["class"]
+
+      X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=TEST_SIZE, stratify=y, random_state=SEED
+      )
+      print(f"Train: {X_train.shape[0]} filas | Test: {X_test.shape[0]} filas")
+
+      splits = {
+        "s3://data/final/train/X.csv": X_train,
+        "s3://data/final/train/y.csv": y_train.to_frame(name="class"),
+        "s3://data/final/test/X.csv": X_test,
+        "s3://data/final/test/y.csv": y_test.to_frame(name="class"),
+      }
+      for path, frame in splits.items():
+        wr.s3.to_csv(df=frame, path=path, index=False)
+        print(f"Guardado en S3 {path}")
+
+      metadata = {
+        "seed": SEED,
+        "test_size": TEST_SIZE,
+        "feature_sets": feature_sets,
+        "target": "class",
+        "n_train": int(X_train.shape[0]),
+        "n_test": int(X_test.shape[0]),
+        "class_proportions_train": {
+          str(code): round(float(prop), 4)
+          for code, prop in y_train.value_counts(normalize=True).sort_index().items()
+        },
+      }
+      boto3.client("s3").put_object(
+        Bucket="data",
+        Key="metadata/split.json",
+        Body=json.dumps(metadata, indent=2).encode("utf-8"),
+        ContentType="application/json"
+      )
+      print("Metadata del split guardada en S3 s3://data/metadata/split.json")
+
+    get_data() >> clean_data() >> feature_engineering_and_encoding() >> split_dataset()
 
 dag = etl_process()
 
