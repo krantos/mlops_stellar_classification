@@ -50,7 +50,7 @@ def etl_process():
         path = kagglehub.dataset_download(
             "fedesoriano/stellar-classification-dataset-sdss17"
         )
-        s3_path = f"s3://data/raw/{run_version}/stellar_classification.csv"
+        s3_path = f"s3://data/{run_version}/raw/stellar_classification.csv"
         csv_file = glob.glob(os.path.join(path, "*.csv"))
         path = csv_file[0]
         df = pd.read_csv(path)
@@ -67,7 +67,7 @@ def etl_process():
         import pandas as pd
         import awswrangler as wr
 
-        s3_path = f"s3://data/raw/{run_version}/stellar_classification.csv"
+        s3_path = f"s3://data/{run_version}/raw/stellar_classification.csv"
         df = wr.s3.read_csv(path=s3_path)
 
         mask_missings = (df[["u", "g", "z"]] == -9999).any(axis=1)
@@ -86,7 +86,7 @@ def etl_process():
         ]
         df = df.drop(columns=drop_cols)
 
-        s3_clean = f"s3://data/clean/{run_version}/stellar_classification.csv"
+        s3_clean = f"s3://data/{run_version}/clean/stellar_classification.csv"
         wr.s3.to_csv(df=df, path=s3_clean, index=False)
         print(f"Dataset limpio guardado en S3 {s3_clean}")
 
@@ -105,7 +105,7 @@ def etl_process():
         import boto3
         from sklearn.preprocessing import LabelEncoder
 
-        s3_path = f"s3://data/clean/{run_version}/stellar_classification.csv"
+        s3_path = f"s3://data/{run_version}/clean/stellar_classification.csv"
         df = wr.s3.read_csv(path=s3_path)
         df["u_g"] = df["u"] - df["g"]
         df["g_r"] = df["g"] - df["r"]
@@ -117,11 +117,11 @@ def etl_process():
         class_mapping = {int(code): str(name) for code, name in enumerate(le.classes_)}
         print(f"Mapeo de clases: {class_mapping}")
 
-        s3_feature = f"s3://data/features/{run_version}/stellar_classification.csv"
+        s3_feature = f"s3://data/{run_version}/features/stellar_classification.csv"
         wr.s3.to_csv(df=df, path=s3_feature, index=False)
         print(f"Dataset con features guardado en S3 {s3_feature}")
 
-        mapping_key = f"metadata/{run_version}/class_mapping.json"
+        mapping_key = f"{run_version}/metadata/class_mapping.json"
         boto3.client("s3").put_object(
             Bucket="data",
             Key=mapping_key,
@@ -148,7 +148,7 @@ def etl_process():
         SEED = 42
         TEST_SIZE = 0.20
 
-        s3_feature = f"s3://data/features/{run_version}/stellar_classification.csv"
+        s3_feature = f"s3://data/{run_version}/features/stellar_classification.csv"
         df = wr.s3.read_csv(path=s3_feature)
 
         mags = ["u", "g", "r", "i", "z"]
@@ -167,7 +167,7 @@ def etl_process():
         )
         print(f"Train: {X_train.shape[0]} filas | Test: {X_test.shape[0]} filas")
 
-        base = f"s3://data/final/{run_version}"
+        base = f"s3://data/{run_version}/final"
         splits = {
             f"{base}/train/X.csv": X_train,
             f"{base}/train/y.csv": y_train.to_frame(name="class"),
@@ -194,7 +194,7 @@ def etl_process():
             },
             "paths": {
                 "features": s3_feature,
-                "class_mapping": f"s3://data/metadata/{run_version}/class_mapping.json",
+                "class_mapping": f"s3://data/{run_version}/metadata/class_mapping.json",
                 "X_train": f"{base}/train/X.csv",
                 "y_train": f"{base}/train/y.csv",
                 "X_test": f"{base}/test/X.csv",
@@ -204,7 +204,7 @@ def etl_process():
 
         s3 = boto3.client("s3")
         body = json.dumps(metadata, indent=2).encode("utf-8")
-        for key in (f"metadata/{run_version}/split.json", "metadata/latest.json"):
+        for key in (f"{run_version}/metadata/split.json", "metadata/latest.json"):
             s3.put_object(
                 Bucket="data", Key=key, Body=body, ContentType="application/json"
             )
