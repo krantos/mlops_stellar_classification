@@ -15,6 +15,11 @@ default_args = {
   'dagrun_timeout': datetime.timedelta(minutes=15)
 }
 
+# Every artifact of a run is written under this version so a new run never
+# overwrites the data an earlier one produced. Retries reuse the same value
+# because it comes from the logical date, not from wall-clock time.
+RUN_VERSION = "{{ logical_date.strftime('%Y/%m/%d/%H') }}"
+
 
 @dag(
   dag_id='etl_process',
@@ -35,7 +40,7 @@ def etl_process():
                     ],
       system_site_packages=True
     )
-    def get_data():
+    def get_data(run_version: str):
       """
         Download the raw data from Kaggle
       """
@@ -46,8 +51,8 @@ def etl_process():
       import os
 
       path = kagglehub.dataset_download("fedesoriano/stellar-classification-dataset-sdss17")
-      s3_path = "s3://data/raw/stellar_classification.csv"
-      csv_file = glob.glob(os.path.join(path, "*.csv"))        
+      s3_path = f"s3://data/raw/{run_version}/stellar_classification.csv"
+      csv_file = glob.glob(os.path.join(path, "*.csv"))
       path = csv_file[0]
       df = pd.read_csv(path)
       wr.s3.to_csv(df=df, path=s3_path, index=False)
@@ -60,25 +65,25 @@ def etl_process():
          "pandas",
          "awswrangler==3.6.0"
       ]
-    )    
-    def clean_data():
+    )
+    def clean_data(run_version: str):
       """
        Clean dataset by removing duplicates, nulls and errors, and drop IDs without meaning.
       """
       import pandas as pd
       import awswrangler as wr
 
-      s3_path = "s3://data/raw/stellar_classification.csv"
+      s3_path = f"s3://data/raw/{run_version}/stellar_classification.csv"
       df = wr.s3.read_csv(path=s3_path)
-      
+
       mask_missings = (df[["u", "g", "z"]] == -9999).any(axis=1)
       df = df[~mask_missings].reset_index(drop=True)
       df = df.dropna().copy()
       drop_cols = ["obj_ID", "spec_obj_ID", "run_ID", "rerun_ID", "cam_col",
             "field_ID", "fiber_ID", "plate", "MJD"]
       df = df.drop(columns=drop_cols)
-      
-      s3_clean = "s3://data/clean/stellar_classification.csv"
+
+      s3_clean = f"s3://data/clean/{run_version}/stellar_classification.csv"
       wr.s3.to_csv(df=df, path=s3_clean, index=False)
       print(f"Dataset limpio guardado en S3 {s3_clean}")
 
@@ -92,7 +97,7 @@ def etl_process():
           "scikit-learn"
        ]
     )
-    def feature_engineering_and_encoding():
+    def feature_engineering_and_encoding(run_version: str):
       """
         Build the color indices and encode the target with LabelEncoder.
         The class mapping is stored in S3 so inference can map codes back to labels.
@@ -103,7 +108,7 @@ def etl_process():
       import boto3
       from sklearn.preprocessing import LabelEncoder
 
-      s3_path = "s3://data/clean/stellar_classification.csv"
+      s3_path = f"s3://data/clean/{run_version}/stellar_classification.csv"
       df = wr.s3.read_csv(path=s3_path)
       df["u_g"] = df["u"] - df["g"]
       df["g_r"] = df["g"] - df["r"]
@@ -115,17 +120,18 @@ def etl_process():
       class_mapping = {int(code): str(name) for code, name in enumerate(le.classes_)}
       print(f"Mapeo de clases: {class_mapping}")
 
-      s3_feature = "s3://data/features/stellar_classification.csv"
+      s3_feature = f"s3://data/features/{run_version}/stellar_classification.csv"
       wr.s3.to_csv(df=df, path=s3_feature, index=False)
       print(f"Dataset con features guardado en S3 {s3_feature}")
 
+      mapping_key = f"metadata/{run_version}/class_mapping.json"
       boto3.client("s3").put_object(
         Bucket="data",
-        Key="metadata/class_mapping.json",
+        Key=mapping_key,
         Body=json.dumps(class_mapping, indent=2).encode("utf-8"),
         ContentType="application/json"
       )
-      print("Mapeo de clases guardado en S3 s3://data/metadata/class_mapping.json")
+      print(f"Mapeo de clases guardado en S3 s3://data/{mapping_key}")
 
 
     @task.virtualenv(
@@ -137,9 +143,10 @@ def etl_process():
           "scikit-learn"
        ]
     )
-    def split_dataset():
+    def split_dataset(run_version: str):
       """
         Single stratified 80/20 split, reused by every model so the comparison stays fair.
+        Also writes a pointer to this version on latest.json to track it.
       """
       import json
 
@@ -150,7 +157,7 @@ def etl_process():
       SEED = 42
       TEST_SIZE = 0.20
 
-      s3_feature = "s3://data/features/stellar_classification.csv"
+      s3_feature = f"s3://data/features/{run_version}/stellar_classification.csv"
       df = wr.s3.read_csv(path=s3_feature)
 
       mags = ["u", "g", "r", "i", "z"]
@@ -169,17 +176,19 @@ def etl_process():
       )
       print(f"Train: {X_train.shape[0]} filas | Test: {X_test.shape[0]} filas")
 
+      base = f"s3://data/final/{run_version}"
       splits = {
-        "s3://data/final/train/X.csv": X_train,
-        "s3://data/final/train/y.csv": y_train.to_frame(name="class"),
-        "s3://data/final/test/X.csv": X_test,
-        "s3://data/final/test/y.csv": y_test.to_frame(name="class"),
+        f"{base}/train/X.csv": X_train,
+        f"{base}/train/y.csv": y_train.to_frame(name="class"),
+        f"{base}/test/X.csv": X_test,
+        f"{base}/test/y.csv": y_test.to_frame(name="class"),
       }
       for path, frame in splits.items():
         wr.s3.to_csv(df=frame, path=path, index=False)
         print(f"Guardado en S3 {path}")
 
       metadata = {
+        "run_version": run_version,
         "seed": SEED,
         "test_size": TEST_SIZE,
         "feature_sets": feature_sets,
@@ -190,16 +199,27 @@ def etl_process():
           str(code): round(float(prop), 4)
           for code, prop in y_train.value_counts(normalize=True).sort_index().items()
         },
+        "paths": {
+          "features": s3_feature,
+          "class_mapping": f"s3://data/metadata/{run_version}/class_mapping.json",
+          "X_train": f"{base}/train/X.csv",
+          "y_train": f"{base}/train/y.csv",
+          "X_test": f"{base}/test/X.csv",
+          "y_test": f"{base}/test/y.csv",
+        },
       }
-      boto3.client("s3").put_object(
-        Bucket="data",
-        Key="metadata/split.json",
-        Body=json.dumps(metadata, indent=2).encode("utf-8"),
-        ContentType="application/json"
-      )
-      print("Metadata del split guardada en S3 s3://data/metadata/split.json")
 
-    get_data() >> clean_data() >> feature_engineering_and_encoding() >> split_dataset()
+      s3 = boto3.client("s3")
+      body = json.dumps(metadata, indent=2).encode("utf-8")
+      for key in (f"metadata/{run_version}/split.json", "metadata/latest.json"):
+        s3.put_object(Bucket="data", Key=key, Body=body, ContentType="application/json")
+        print(f"Metadata del split guardada en S3 s3://data/{key}")
+
+    (
+      get_data(RUN_VERSION)
+      >> clean_data(RUN_VERSION)
+      >> feature_engineering_and_encoding(RUN_VERSION)
+      >> split_dataset(RUN_VERSION)
+    )
 
 dag = etl_process()
-
