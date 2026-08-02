@@ -1,4 +1,9 @@
 ### MLOps1 - CEIA - FIUBA
+## Integrantes
+- Marcos Riveros a2537
+- Franco Morero a2533 
+- Tadeo Riveros a2536
+
 Estructura de servicios para la implementación del proyecto final de MLOps1 - CEIA - FIUBA
 
 Para simular esta empresa, utilizaremos Docker y, a través de Docker Compose, desplegaremos varios contenedores que representan distintos servicios en un entorno productivo.
