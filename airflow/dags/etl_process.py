@@ -46,12 +46,12 @@ def etl_process():
       import os
 
       path = kagglehub.dataset_download("fedesoriano/stellar-classification-dataset-sdss17")
-      s3_path = f"s3://data/raw/stellar_classification.csv"
+      s3_path = "s3://data/raw/stellar_classification.csv"
       csv_file = glob.glob(os.path.join(path, "*.csv"))        
       path = csv_file[0]
       df = pd.read_csv(path)
       wr.s3.to_csv(df=df, path=s3_path, index=False)
-      print("Database subido a: ", s3_path)
+      print(f"Dataset crudo subido a S3 {s3_path}")
 
 
     @task.virtualenv(
@@ -63,7 +63,7 @@ def etl_process():
     )    
     def clean_data():
       """
-       Clean dataset by removing duplicates, nulls and errors, and remove id's without meainig.
+       Clean dataset by removing duplicates, nulls and errors, and drop IDs without meaning.
       """
       import pandas as pd
       import awswrangler as wr
@@ -105,7 +105,7 @@ def etl_process():
       df["i_z"] = df["i"] - df["z"]
       s3_feature = "s3://data/features/stellar_classification.csv"
       wr.s3.to_csv(df=df, path=s3_feature, index=False)
-      print(f"Dataset limpio guardado en S3 {s3_feature}")
+      print(f"Dataset con features guardado en S3 {s3_feature}")
 
     get_data() >> clean_data() >> feature_engineering_and_encoding()
 
