@@ -1,2 +1,2 @@
-mlflow[extras]~=2.10
+mlflow[extras]==2.22.2
 boto3~=1.34
