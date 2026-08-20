@@ -3,22 +3,28 @@ import datetime
 from airflow.decorators import dag, task
 
 markdown_text = """
-  ETL Process for Stellar Classification
+  Baja el dataset SDSS17 de Kaggle, lo limpia, genera los indices de color,
+  codifica el target y hace el split 80/20 estratificado. Cada corrida queda
+  versionada por fecha en s3://data y actualiza el puntero latest.json que
+  despues lee el DAG train_model.
 """
 
 default_args = {
     "owner": "Estrellados",
     "depends_on_past": False,
-    "schedule_interval": None,
     "retries": 1,
     "retry_delay": datetime.timedelta(minutes=5),
     "dagrun_timeout": datetime.timedelta(minutes=15),
 }
 
-# Every artifact of a run is written under this version so a new run never
-# overwrites the data an earlier one produced. Retries reuse the same value
-# because it comes from the logical date, not from wall-clock time.
-RUN_VERSION = "{{ logical_date.strftime('%Y/%m/%d/%H') }}"
+# Cada corrida escribe sus artefactos bajo esta version, asi una corrida nueva
+# nunca pisa los datos de una anterior. Los retries reusan el mismo valor porque
+# sale de la fecha del run y no del reloj. Granularidad a segundos para que dos
+# triggers manuales en la misma hora no colisionen. En Airflow 3 los triggers
+# manuales pueden venir sin logical_date, por eso el fallback a run_after.
+RUN_VERSION = (
+    "{{ (dag_run.logical_date or dag_run.run_after).strftime('%Y/%m/%d/%H%M%S') }}"
+)
 
 
 @dag(
@@ -28,7 +34,7 @@ RUN_VERSION = "{{ logical_date.strftime('%Y/%m/%d/%H') }}"
     tags=["ETL", "stellar classification"],
     default_args=default_args,
     catchup=False,
-    schedule="@monthly",
+    schedule=None,
 )
 def etl_process():
 
@@ -41,11 +47,12 @@ def etl_process():
         """
         Download the raw data from Kaggle
         """
-        import kagglehub
-        import awswrangler as wr
-        import pandas as pd
         import glob
         import os
+
+        import awswrangler as wr
+        import kagglehub
+        import pandas as pd
 
         path = kagglehub.dataset_download(
             "fedesoriano/stellar-classification-dataset-sdss17"
@@ -64,7 +71,6 @@ def etl_process():
         """
         Clean dataset by removing duplicates, nulls and errors, and drop IDs without meaning.
         """
-        import pandas as pd
         import awswrangler as wr
 
         s3_path = f"s3://data/{run_version}/raw/stellar_classification.csv"

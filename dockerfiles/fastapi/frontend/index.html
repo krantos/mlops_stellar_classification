@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clasificador Estelar SDSS-17</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <style>
+      [x-cloak] {
+        display: none !important;
+      }
+      /* campo de estrellas sutil con gradientes radiales */
+      body {
+        background-image:
+          radial-gradient(
+            1px 1px at 12% 22%,
+            rgba(255, 255, 255, 0.5) 50%,
+            transparent 51%
+          ),
+          radial-gradient(
+            1px 1px at 78% 12%,
+            rgba(255, 255, 255, 0.4) 50%,
+            transparent 51%
+          ),
+          radial-gradient(
+            1.5px 1.5px at 45% 68%,
+            rgba(255, 255, 255, 0.35) 50%,
+            transparent 51%
+          ),
+          radial-gradient(
+            1px 1px at 88% 55%,
+            rgba(255, 255, 255, 0.45) 50%,
+            transparent 51%
+          ),
+          radial-gradient(
+            1px 1px at 30% 85%,
+            rgba(255, 255, 255, 0.3) 50%,
+            transparent 51%
+          ),
+          radial-gradient(
+            1.5px 1.5px at 63% 33%,
+            rgba(255, 255, 255, 0.4) 50%,
+            transparent 51%
+          );
+        background-size: 900px 700px;
+      }
+    </style>
+  </head>
+  <body
+    class="min-h-screen bg-slate-950 font-sans text-slate-200"
+    x-data="classifier()"
+    x-init="init()"
+  >
+    <header
+      class="bg-slate-900/80 border-b border-slate-800 px-5 py-3 flex items-center gap-4 backdrop-blur"
+    >
+      <div>
+        <h1 class="text-lg font-semibold tracking-tight leading-none">
+          Clasificador Estelar SDSS-17
+        </h1>
+        <p class="text-[11px] text-slate-400 leading-tight mt-0.5">
+          GALAXY / QSO / STAR con XGBoost
+        </p>
+      </div>
+      <span
+        class="ml-auto text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1"
+        :class="info?.model_version ? 'text-emerald-400' : 'text-red-400'"
+        x-text="info?.model_version ? 'modelo v' + info.model_version : 'sin modelo'"
+      ></span>
+    </header>
+
+    <main class="max-w-4xl mx-auto p-4 md:p-6 grid md:grid-cols-2 gap-4">
+      <!-- formulario -->
+      <div
+        class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4"
+      >
+        <h2
+          class="text-sm font-semibold uppercase tracking-wide text-slate-400"
+        >
+          Parámetros de observación
+        </h2>
+
+        <div class="flex gap-2 text-xs">
+          <button
+            class="flex-1 rounded-lg border border-violet-500/40 text-violet-300 py-1.5 hover:bg-violet-500/10 transition-colors"
+            @click="preset('galaxy')"
+          >
+            Galaxia
+          </button>
+          <button
+            class="flex-1 rounded-lg border border-cyan-500/40 text-cyan-300 py-1.5 hover:bg-cyan-500/10 transition-colors"
+            @click="preset('qso')"
+          >
+            Quásar
+          </button>
+          <button
+            class="flex-1 rounded-lg border border-amber-500/40 text-amber-300 py-1.5 hover:bg-amber-500/10 transition-colors"
+            @click="preset('star')"
+          >
+            Estrella
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <template x-for="f in fields" :key="f.name">
+            <label class="block">
+              <span class="text-xs text-slate-400" x-text="f.label"></span>
+              <input
+                type="number"
+                step="any"
+                x-model="form[f.name]"
+                class="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm focus:outline-none focus:border-slate-500"
+              />
+              <span class="text-[10px] text-slate-500" x-text="f.hint"></span>
+            </label>
+          </template>
+        </div>
+
+        <!-- redshift: variable mas importante -->
+        <div
+          class="rounded-xl border border-indigo-500/40 bg-indigo-500/5 p-3.5 space-y-2.5"
+        >
+          <p class="text-[12px] leading-snug text-slate-300">
+            <span class="font-semibold text-indigo-300">redshift</span> es el
+            descriptor más fuerte del modelo.
+          </p>
+
+          <div class="flex items-baseline justify-between text-xs">
+            <span class="text-slate-400">redshift</span>
+            <span
+              class="tabular-nums font-semibold text-indigo-300"
+              x-text="Number(form.redshift).toFixed(4)"
+            ></span>
+          </div>
+
+          <input
+            type="range"
+            :min="redshiftMin"
+            :max="redshiftMax"
+            step="0.001"
+            x-model.number="form.redshift"
+            class="w-full accent-indigo-500"
+          />
+
+          <div
+            class="flex justify-between text-[10px] text-slate-500 tabular-nums"
+          >
+            <span x-text="redshiftMin"></span>
+            <span x-text="redshiftMax"></span>
+          </div>
+        </div>
+
+        <button
+          class="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 flex items-center justify-center gap-2 transition-colors"
+          :disabled="loading"
+          @click="predict()"
+        >
+          <span
+            x-show="loading"
+            class="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"
+          ></span>
+          <span x-text="loading ? 'Clasificando…' : 'Clasificar'"></span>
+        </button>
+      </div>
+
+      <!-- resultado -->
+      <div
+        class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4"
+      >
+        <h2
+          class="text-sm font-semibold uppercase tracking-wide text-slate-400"
+        >
+          Resultado
+        </h2>
+
+        <p class="text-sm text-slate-500" x-show="!result && !error">
+          Cargá los parámetros y clasificá el objeto
+        </p>
+
+        <div
+          class="bg-red-950/60 border border-red-800 text-red-300 rounded-xl p-3.5 text-[13px] leading-relaxed"
+          x-show="error"
+          x-text="error"
+          x-cloak
+        ></div>
+
+        <template x-if="result">
+          <div class="space-y-4">
+            <p
+              class="text-4xl font-bold tracking-tight"
+              :class="classColor(result.prediction)"
+              x-text="result.prediction"
+            ></p>
+
+            <div class="space-y-2.5">
+              <template
+                x-for="cls in Object.keys(result.probabilities)"
+                :key="cls"
+              >
+                <div>
+                  <div class="flex justify-between text-xs mb-1">
+                    <span :class="classColor(cls)" x-text="cls"></span>
+                    <span
+                      class="tabular-nums text-slate-400"
+                      x-text="((result.probabilities[cls] || 0) * 100).toFixed(1) + ' %'"
+                    ></span>
+                  </div>
+                  <div class="h-2 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
+                      :class="barColor(cls)"
+                      :style="'width:' + ((result.probabilities[cls] || 0) * 100) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <p
+              class="text-[11px] text-slate-500"
+              x-text="'modelo v' + result.model_version"
+            ></p>
+          </div>
+        </template>
+      </div>
+    </main>
+
+    <script>
+      function classifier() {
+        const presets = {
+          galaxy: {
+            u: 23.87,
+            g: 22.27,
+            r: 20.39,
+            i: 19.16,
+            z: 18.79,
+            alpha: 135.69,
+            delta: 32.49,
+            redshift: 0.644,
+          },
+          qso: {
+            u: 21.19,
+            g: 20.87,
+            r: 20.62,
+            i: 20.35,
+            z: 20.27,
+            alpha: 27.65,
+            delta: 10.05,
+            redshift: 1.997,
+          },
+          star: {
+            u: 18.66,
+            g: 17.35,
+            r: 16.83,
+            i: 16.66,
+            z: 16.61,
+            alpha: 328.16,
+            delta: -0.65,
+            redshift: 0.0001,
+          },
+        };
+        return {
+          fields: [
+            { name: "u", label: "u (ultravioleta)", hint: "magnitud 10 a 32" },
+            { name: "g", label: "g (verde)", hint: "magnitud 10 a 32" },
+            { name: "r", label: "r (rojo)", hint: "magnitud 10 a 32" },
+            {
+              name: "i",
+              label: "i (infrarrojo cercano)",
+              hint: "magnitud 10 a 32",
+            },
+            { name: "z", label: "z (infrarrojo)", hint: "magnitud 10 a 32" },
+            {
+              name: "alpha",
+              label: "alpha (asc. recta)",
+              hint: "0 a 360 grados",
+            },
+            {
+              name: "delta",
+              label: "delta (declinación)",
+              hint: "-90 a 90 grados",
+            },
+            { name: "redshift", label: "redshift", hint: "-0.05 a 7.1" },
+          ],
+          form: { ...presets.galaxy },
+          info: null,
+          result: null,
+          error: null,
+          loading: false,
+          redshiftMin: -0.05,
+          redshiftMax: 7.1,
+
+          async init() {
+            try {
+              this.info = await (await fetch("/info")).json();
+            } catch {
+              /* sin info el resto sigue andando */
+            }
+          },
+
+          preset(name) {
+            this.form = { ...presets[name] };
+            this.result = null;
+            this.error = null;
+          },
+
+          hue(cls) {
+            return (
+              { GALAXY: "violet-400", QSO: "cyan-400", STAR: "amber-400" }[
+                cls
+              ] || "slate-400"
+            );
+          },
+          classColor(cls) {
+            return "text-" + this.hue(cls);
+          },
+          barColor(cls) {
+            return "bg-" + this.hue(cls);
+          },
+
+          async predict() {
+            this.error = null;
+            this.result = null;
+            this.loading = true;
+            const payload = {};
+            for (const f of this.fields)
+              payload[f.name] = parseFloat(this.form[f.name]);
+            try {
+              const res = await fetch("/predict", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const body = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                // 422 de Pydantic: detail es una lista de errores de campo
+                this.error = Array.isArray(body.detail)
+                  ? body.detail
+                      .map(
+                        (e) => (e.loc?.slice(1).join(".") || "") + ": " + e.msg,
+                      )
+                      .join("\n")
+                  : body.detail || "Error " + res.status;
+              } else {
+                this.result = body;
+              }
+            } catch {
+              this.error =
+                "Se cortó la conexión con el servidor. Probá de nuevo en unos segundos.";
+            } finally {
+              this.loading = false;
+            }
+          },
+        };
+      }
+    </script>
+  </body>
+</html>
