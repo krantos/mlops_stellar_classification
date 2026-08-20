@@ -3,13 +3,15 @@ import datetime
 from airflow.decorators import dag, task
 
 markdown_text = """
-  ETL Process for Stellar Classification
+  Baja el dataset SDSS17 de Kaggle, lo limpia, genera los indices de color,
+  codifica el target y hace el split 80/20 estratificado. Cada corrida queda
+  versionada por fecha en s3://data y actualiza el puntero latest.json que
+  despues lee el DAG train_model.
 """
 
 default_args = {
     "owner": "Estrellados",
     "depends_on_past": False,
-    "schedule_interval": None,
     "retries": 1,
     "retry_delay": datetime.timedelta(minutes=5),
     "dagrun_timeout": datetime.timedelta(minutes=15),
