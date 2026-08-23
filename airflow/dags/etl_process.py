@@ -65,6 +65,7 @@ def etl_process():
       """
        Clean dataset by removing duplicates, nulls and errors, and remove id's without meainig.
       """
+      import pandas as pd
       import awswrangler as wr
 
       s3_path = "s3://data/raw/stellar_classification.csv"
@@ -83,16 +84,17 @@ def etl_process():
 
 
     @task.virtualenv(
-       task_id="feature_engineering",
+       task_id="feature_engineering_and_encoding",
        requirements=[
           "pandas",
           "awswrangler==3.6.0"
        ]
     )
-    def feature_engineering():
+    def feature_engineering_and_encoding():
       """
         Feature engineering step
       """
+      import pandas as pd
       import awswrangler as wr
 
       s3_path = "s3://data/clean/stellar_classification.csv"
@@ -101,60 +103,11 @@ def etl_process():
       df["g_r"] = df["g"] - df["r"]
       df["r_i"] = df["r"] - df["i"]
       df["i_z"] = df["i"] - df["z"]
-
       s3_feature = "s3://data/features/stellar_classification.csv"
       wr.s3.to_csv(df=df, path=s3_feature, index=False)
       print(f"Dataset limpio guardado en S3 {s3_feature}")
 
-  
-    @task.virtualenv(
-      task_id="split_dataset",
-      requirements=[
-          "awswrangler==3.6.0",
-          "scikit-learn==1.3.2",
-      ],
-      system_site_packages=True
-    )
-    def split_dataset():
-      """
-      Generate a dataset split into a training part and a test part
-      """
-      import pandas as pd
-      import awswrangler as wr
-      from sklearn.model_selection import train_test_split
-      from sklearn.preprocessing import LabelEncoder
-
-      SEED = 42
-      SEARCH_SAMPLE = 20000
-      TEST_SIZE = 0.2
-
-      def save_to_csv(df, path):
-          wr.s3.to_csv(df=df, path=path, index=False)
-
-      s3_path = "s3://data/clean/stellar_classification.csv"
-      dataset = wr.s3.read_csv(path=s3_path)
-
-      le = LabelEncoder()
-      X = dataset.drop(columns=["class"])
-      y = pd.Series(le.fit_transform(dataset["class"]), name="class")
-
-      X_train, X_test, y_train, y_test = train_test_split(
-          X, y, test_size=TEST_SIZE, stratify=y, random_state=SEED
-      )
-
-      X_search, _, y_search, _ = train_test_split(
-        X_train, y_train, train_size=SEARCH_SAMPLE, 
-        stratify=y_train, random_state=SEED
-      )
-
-      save_to_csv(X_train, "s3://data/final/train/stellar_X_train.csv")
-      save_to_csv(X_test, "s3://data/final/test/stellar_X_test.csv")
-      save_to_csv(X_search, "s3://data/final/search/stellar_x_search.csv")
-      save_to_csv(y_train.to_frame(), "s3://data/final/train/stellar_y_train.csv")
-      save_to_csv(y_test.to_frame(), "s3://data/final/test/stellar_y_test.csv")
-      save_to_csv(y_search.to_frame(), "s3://data/final/search/stellar_y_search.csv")
-
-    clean_data() >> feature_engineering() >> split_dataset()
+    get_data() >> clean_data() >> feature_engineering_and_encoding()
 
 dag = etl_process()
 

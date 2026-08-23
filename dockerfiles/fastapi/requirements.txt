@@ -1,2 +1,8 @@
 fastapi>=0.116
 uvicorn>=0.27
+pydantic
+sqlalchemy
+mlflow
+boto3
+psycopg2-binary
+httpx
