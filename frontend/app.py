@@ -23,6 +23,18 @@ if st.button("Listar modelos"):
     except requests.RequestException as e:
         st.error(f"No se pudo conectar a la API: {e}")
 
+st.subheader("Modelo en producción")
+if st.button("Consultar modelo en producción"):
+    try:
+        resp = requests.get(f"{API_URL}/modelos/produccion", timeout=5)
+        data = resp.json()
+        if resp.ok:
+            st.json(data)
+        else:
+            st.error(data.get("detail", "No se pudo obtener el modelo en producción"))
+    except requests.RequestException as e:
+        st.error(f"No se pudo conectar a la API: {e}")
+
 st.subheader("Nueva observación")
 with st.form("observacion_form"):
     alpha = st.number_input("Alpha (ascensión recta)", format="%.6f")

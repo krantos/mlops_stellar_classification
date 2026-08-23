@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mlflow.tracking import MlflowClient
 
+from mlflow_service import ConexionMlflowError, ModeloNoEncontradoError, obtener_modelo_produccion
 from schemas import StellarObservation
 from services import procesar_observacion
 
@@ -37,6 +38,16 @@ def listar_modelos():
         }
         for v in modelos
     ]
+
+@app.get("/modelos/produccion")
+async def modelo_en_produccion():
+    """Devuelve el último modelo de Stellar Classification en producción"""
+    try:
+        return await obtener_modelo_produccion(client)
+    except ModeloNoEncontradoError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConexionMlflowError as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo conectar con MLflow: {e}")
 
 @app.get("/hello")
 def hello():
