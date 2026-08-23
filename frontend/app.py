@@ -62,11 +62,13 @@ if enviado:
         resp = requests.post(f"{API_URL}/observaciones", json=payload, timeout=5)
         data = resp.json()
         if resp.ok:
-            st.success(data.get("message", "Datos recibidos"))
-            st.json(data)
-        else:
-            st.error(data.get("message", "No se pudieron procesar los datos"))
-            for error in data.get("errores", []):
+            st.success(data.get("message", "Predicción generada"))
+            st.metric("Clase predicha", data.get("clase", "-"))
+        elif "errores" in data:
+            st.error(data.get("message", "Datos inválidos"))
+            for error in data["errores"]:
                 st.warning(f"{error['campo']}: {error['mensaje']}")
+        else:
+            st.error(data.get("detail", "No se pudo generar la predicción"))
     except requests.RequestException as e:
         st.error(f"No se pudo conectar a la API: {e}")

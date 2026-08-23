@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from mlflow.tracking import MlflowClient
 
 from mlflow_service import ConexionMlflowError, ModeloNoEncontradoError, obtener_modelo_produccion
+from prediction_service import PrediccionError, predecir_clase
 from schemas import StellarObservation
 from services import procesar_observacion
 
@@ -58,6 +59,16 @@ def test():
     return {"message": "test"}
 
 @app.post("/observaciones")
-def recibir_observacion(observacion: StellarObservation):
-    """Recibe una observación nueva del frontend"""
-    return procesar_observacion(observacion)
+async def recibir_observacion(observacion: StellarObservation):
+    """Recibe una observación nueva y predice su clase con el modelo en producción"""
+    procesar_observacion(observacion)
+    try:
+        clase = await predecir_clase(client, observacion)
+    except ModeloNoEncontradoError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConexionMlflowError as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo conectar con MLflow: {e}")
+    except PrediccionError as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo generar la predicción: {e}")
+
+    return {"message": "Predicción generada", "clase": clase}
