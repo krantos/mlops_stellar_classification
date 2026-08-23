@@ -22,3 +22,39 @@ if st.button("Listar modelos"):
         st.json(resp.json())
     except requests.RequestException as e:
         st.error(f"No se pudo conectar a la API: {e}")
+
+st.subheader("Nueva observación")
+with st.form("observacion_form"):
+    alpha = st.number_input("Alpha (ascensión recta)", format="%.6f")
+    delta = st.number_input("Delta (declinación)", format="%.6f")
+    u = st.number_input("u (magnitud ultravioleta)", format="%.6f")
+    g = st.number_input("g (magnitud verde)", format="%.6f")
+    r = st.number_input("r (magnitud roja)", format="%.6f")
+    i = st.number_input("i (magnitud infrarroja cercana)", format="%.6f")
+    z = st.number_input("z (magnitud infrarroja)", format="%.6f")
+    redshift = st.number_input("Redshift", format="%.6f")
+    enviado = st.form_submit_button("Enviar")
+
+if enviado:
+    payload = {
+        "alpha": alpha,
+        "delta": delta,
+        "u": u,
+        "g": g,
+        "r": r,
+        "i": i,
+        "z": z,
+        "redshift": redshift,
+    }
+    try:
+        resp = requests.post(f"{API_URL}/observaciones", json=payload, timeout=5)
+        data = resp.json()
+        if resp.ok:
+            st.success(data.get("message", "Datos recibidos"))
+            st.json(data)
+        else:
+            st.error(data.get("message", "No se pudieron procesar los datos"))
+            for error in data.get("errores", []):
+                st.warning(f"{error['campo']}: {error['mensaje']}")
+    except requests.RequestException as e:
+        st.error(f"No se pudo conectar a la API: {e}")
