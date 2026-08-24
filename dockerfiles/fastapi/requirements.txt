@@ -6,3 +6,9 @@ mlflow
 boto3
 psycopg2-binary
 httpx
+xgboost==3.4.1
+numpy==1.26.4
+scipy==1.17.1
+attrs==25.3.0
+psutil==7.0.0
+rich==13.9.4
