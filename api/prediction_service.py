@@ -15,7 +15,7 @@ class PrediccionError(Exception):
 
 # Fallback para modelos entrenados antes de que el ETL empezara a guardar
 # "class_mapping" en la metadata del modelo (ver etl_process.py / model_training.py).
-CLASE_POR_CODIGO_FALLBACK = {"0": "galaxy", "1": "qso", "2": "STAR"}
+CLASE_POR_CODIGO_FALLBACK = {"0": "GALAXY", "1": "QSO", "2": "STAR"}
 
 
 def _construir_features(observacion: StellarObservation) -> pd.DataFrame:

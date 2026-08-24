@@ -3,28 +3,32 @@ import datetime
 from airflow.decorators import dag, task
 
 markdown_text = """
-### Re-Train the Model for Stellar classification
+### Reentrenamiento del modelo de Stellar Classification
 
-This DAG re-trains the model based on new data, tests the previous model, and put in production the new one 
-if it performs better than the old one. It uses the F1 score to evaluate the model with the test data.
+Este DAG reentrena el modelo con datos nuevos, compara el modelo anterior con el nuevo, y pone en
+producción el que tenga mejor desempeño. Usa el F1-score para evaluar el modelo con los datos de test.
+
+No tiene schedule propio: `etl_process` lo dispara automáticamente en cuanto los datos están listos.
+También se puede disparar manualmente para un reentrenamiento puntual.
 
 """
 
 default_args = {
     'owner': "Estrellados",
     'depends_on_past': False,
-    'schedule_interval': None,
     'retries': 1,
     'retry_delay': datetime.timedelta(minutes=5),
-    'dagrun_timeout': datetime.timedelta(minutes=15)
+    'dagrun_timeout': datetime.timedelta(minutes=60)
 }
 
 @dag(
     dag_id="train_the_model",
-    description="Train the model",
+    description="Entrena el modelo",
     doc_md=markdown_text,
     tags=["train", "Stellar Classification"],
     default_args=default_args,
+    start_date=datetime.datetime(2025, 1, 1),
+    schedule=None,
     catchup=False,
 )
 def processing_dag():
@@ -36,7 +40,6 @@ def processing_dag():
                   "numpy",
                   "xgboost",
                   "optuna",
-                  "catboost",
                   "awswrangler==3.6.0"],
     system_site_packages=True
   )
@@ -47,15 +50,12 @@ def processing_dag():
     import numpy as np
 
     import awswrangler as wr
-    from sklearn.base import clone
     from sklearn.metrics import f1_score
-    from mlflow.models import infer_signature
     from sklearn.model_selection import StratifiedKFold
     from sklearn.utils.class_weight import compute_sample_weight
     from xgboost import XGBClassifier
     from optuna.samplers import TPESampler
-    from catboost import CatBoostClassifier
-    
+
     SEED = 42
     N_TRIALS = 30
     CV_SPLITS = 3
@@ -155,7 +155,7 @@ def processing_dag():
         
         # Guardar en S3 también
         wr.s3.to_json(df=hp_json, path="s3://data/temp/best_hyperparameters.json")
-        print(f"Hiperparámetros guardados en S3 y MLflow")
+        print("Hiperparámetros guardados en S3 y MLflow")
         
         # Loguear tags para mejor trazabilidad
         mlflow.set_tag("model_type", "XGBClassifier")
@@ -245,8 +245,7 @@ def processing_dag():
     
     # Predicciones
     y_pred = modelo.predict(X_test)
-    y_proba = modelo.predict_proba(X_test)
-    
+
     # Métricas
     f1_macro = f1_score(y_test, y_pred, average="macro", zero_division=0)
     print(f"  F1-macro (Test): {f1_macro:.4f}")
@@ -325,7 +324,7 @@ def processing_dag():
         run_id=run_id
     )
     
-    print(f"Modelo registrado exitosamente")
+    print("Modelo registrado exitosamente")
     print(f"   Model Name: {MODEL_NAME}")
     print(f"   Version: {model_version.version}")
     print(f"   F1-macro (Test): {f1_macro:.4f}")
@@ -367,7 +366,7 @@ def processing_dag():
     challenger_f1 = resultado_entrenamiento["f1_macro_test"]
     challenger_version = resultado_entrenamiento["model_version"]
 
-    print(f"Comparando modelos...")
+    print("Comparando modelos...")
     print(f"   Challenger F1: {challenger_f1:.4f} (Version {challenger_version})")
 
     # Buscar el modelo en producción
@@ -392,13 +391,13 @@ def processing_dag():
                 version=challenger_version,
                 stage="Production"
             )
-            return f"Champion promovido sin comparación"
+            return "Champion promovido sin comparación"
 
         print(f"   Champion F1: {champion_f1:.4f} (Version {champion.version})")
 
         # Comparar y promover
         if challenger_f1 > champion_f1:
-            print(f"Challenger es mejor, Promoviendo a Production...")
+            print("Challenger es mejor, Promoviendo a Production...")
             
             # Archivar el champion
             client.transition_model_version_stage(
@@ -417,13 +416,13 @@ def processing_dag():
             print(f"Modelo versión {challenger_version} está ahora en Production")
             return f"Modelo promovido a Production (mejora de {challenger_f1 - champion_f1:.4f} en F1)"
         else:
-            print(f"El champion sigue siendo mejor. No se promueve.")
+            print("El champion sigue siendo mejor. No se promueve.")
             client.transition_model_version_stage(
                 name=MODEL_NAME,
                 version=challenger_version,
                 stage="Staging"
             )
-            return f"Challenger en Staging. Champion seguirá en Production"
+            return "Challenger en Staging. Champion seguirá en Production"
     else:
         # Si no hay champion, promover directamente
         print("No hay champion actual. Promoviendo challenger a Production...")
@@ -438,4 +437,4 @@ def processing_dag():
   resultado = entrenar_modelo_final()
   buscar_hiperparametros() >> resultado >> comparar_y_promover(resultado)
 
-my_dag = processing_dag()
+dag = processing_dag()

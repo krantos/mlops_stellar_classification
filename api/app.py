@@ -24,7 +24,7 @@ def manejar_error_validacion(request: Request, exc: RequestValidationError):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Model Service"}
+    return {"message": "Stellar Classification API"}
 
 @app.get("/modelos")
 def listar_modelos():

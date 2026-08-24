@@ -1,15 +1,17 @@
 import datetime
 
 from airflow.decorators import dag, task
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 markdown_text = """
-  ETL Process for Stellar Classification
+  Proceso de ETL para Stellar Classification.
+  Corre mensualmente y, una vez que los datos están listos, dispara
+  `train_the_model` automáticamente para que todo el pipeline corra sin intervención manual.
 """
 
 default_args = {
   'owner': 'Estrellados',
   'depends_on_past': False,
-  'schedule_interval': None,
   'retries': 1,
   'retry_delay': datetime.timedelta(minutes=5),
   'dagrun_timeout': datetime.timedelta(minutes=15)
@@ -18,10 +20,11 @@ default_args = {
 
 @dag(
   dag_id='etl_process',
-  description='ETL Process for stellar classification',
+  description='Proceso de ETL para Stellar Classification',
   doc_md=markdown_text,
   tags=["ETL", "stellar classification"],
   default_args=default_args,
+  start_date=datetime.datetime(2025, 1, 1),
   catchup=False,
   schedule='@monthly'
 )
@@ -37,7 +40,7 @@ def etl_process():
     )
     def get_data():
       """
-        Download the raw data from Kaggle
+        Descarga los datos crudos desde Kaggle
       """
       import kagglehub
       import awswrangler as wr
@@ -63,9 +66,8 @@ def etl_process():
     )    
     def clean_data():
       """
-       Clean dataset by removing duplicates, nulls and errors, and remove id's without meainig.
+       Limpia el dataset eliminando duplicados, nulos y errores, y descarta columnas de ID sin utilidad.
       """
-      import pandas as pd
       import awswrangler as wr
 
       s3_path = "s3://data/raw/stellar_classification.csv"
@@ -94,8 +96,8 @@ def etl_process():
     )
     def feature_engineering_and_encoding():
       """
-        Feature engineering step and target encoding.
-        The class mapping is stored in S3 so the training DAG can attach it to the model.
+        Etapa de feature engineering y codificación de la clase objetivo.
+        El mapeo de clases se guarda en S3 para que el DAG de entrenamiento lo adjunte al modelo.
       """
       import json
 
@@ -138,9 +140,9 @@ def etl_process():
     )
     def split_dataset():
       """
-        Stratified 80/20 split. El set de train se reutiliza como set de
+        Split estratificado 80/20. El set de train se reutiliza como set de
         búsqueda de hiperparámetros (esa etapa ya hace su propia validación
-        cruzada); el de test queda held-out para la evaluación final.
+        cruzada); el de test queda reservado para la evaluación final.
       """
       import awswrangler as wr
       from sklearn.model_selection import train_test_split
@@ -173,7 +175,12 @@ def etl_process():
         wr.s3.to_csv(df=frame, path=path, index=False)
         print(f"Guardado en S3 {path}")
 
-    get_data() >> clean_data() >> feature_engineering_and_encoding() >> split_dataset()
+    trigger_training = TriggerDagRunOperator(
+      task_id="trigger_train_the_model",
+      trigger_dag_id="train_the_model",
+    )
+
+    get_data() >> clean_data() >> feature_engineering_and_encoding() >> split_dataset() >> trigger_training
 
 dag = etl_process()
 
