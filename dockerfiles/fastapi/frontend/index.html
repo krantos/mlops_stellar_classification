@@ -67,9 +67,11 @@
         </p>
       </div>
       <span
-        class="ml-auto text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1"
-        :class="info?.model_version ? 'text-emerald-400' : 'text-red-400'"
-        x-text="info?.model_version ? 'modelo v' + info.model_version : 'sin modelo'"
+        class="ml-auto text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1 cursor-pointer hover:bg-slate-700 transition-colors select-none"
+        :class="reloading ? 'text-amber-400' : (info?.model_version ? 'text-emerald-400' : 'text-red-400')"
+        :title="reloading ? 'Recargando…' : 'Click para recargar el modelo'"
+        @click="reload()"
+        x-text="reloading ? 'recargando…' : (info?.model_version ? 'modelo v' + info.model_version : 'sin modelo')"
       ></span>
     </header>
 
@@ -291,6 +293,7 @@
           result: null,
           error: null,
           loading: false,
+          reloading: false,
           redshiftMin: -0.05,
           redshiftMax: 7.1,
 
@@ -299,6 +302,19 @@
               this.info = await (await fetch("/info")).json();
             } catch {
               /* sin info el resto sigue andando */
+            }
+          },
+
+          async reload() {
+            if (this.reloading) return;
+            this.reloading = true;
+            try {
+              await fetch("/reload", { method: "POST" });
+              this.info = await (await fetch("/info")).json();
+            } catch {
+              /* si falla, el span vuelve a reflejar el estado previo */
+            } finally {
+              this.reloading = false;
             }
           },
 
