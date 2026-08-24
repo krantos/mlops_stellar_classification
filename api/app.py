@@ -50,14 +50,6 @@ async def modelo_en_produccion():
     except ConexionMlflowError as e:
         raise HTTPException(status_code=502, detail=f"No se pudo conectar con MLflow: {e}")
 
-@app.get("/hello")
-def hello():
-    return {"message": "Holo"}
-
-@app.get("/test")
-def test():
-    return {"message": "test"}
-
 @app.post("/observaciones")
 async def recibir_observacion(observacion: StellarObservation):
     """Recibe una observación nueva y predice su clase con el modelo en producción"""

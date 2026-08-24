@@ -181,6 +181,9 @@ def processing_dag():
     """
       Creamos un nuevo experimento en mlflow. Entrena modelo final y lo registramos en mlflow.
     """
+    import json
+
+    import boto3
     import pandas as pd
     import numpy as np
     import awswrangler as wr
@@ -216,6 +219,11 @@ def processing_dag():
     hp_dict = hp_json.to_dict(orient="records")[0]
     mejores_params = hp_dict["best_params"]
     f1_cv = hp_dict["best_value"]
+
+    # Cargar el mapeo de clases generado en el ETL, para adjuntarlo al modelo
+    print("Cargando mapeo de clases desde S3...")
+    mapping_obj = boto3.client("s3").get_object(Bucket="data", Key="metadata/class_mapping.json")
+    class_mapping = json.loads(mapping_obj["Body"].read())
 
     print("Entrenando modelo final con dataset completo...")
     
@@ -291,7 +299,8 @@ def processing_dag():
             metadata={
                 "f1_macro_test": f1_macro,
                 "f1_macro_cv": f1_cv,
-                "training_date": datetime.now().isoformat()
+                "training_date": datetime.now().isoformat(),
+                "class_mapping": class_mapping
             }
         )
         
