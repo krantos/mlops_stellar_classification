@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mlflow.tracking import MlflowClient
 
+from health_service import verificar_salud
 from mlflow_service import ConexionMlflowError, ModeloNoEncontradoError, obtener_modelo_produccion
 from prediction_service import PrediccionError, predecir_clase
 from schemas import StellarObservation
@@ -25,6 +26,11 @@ def manejar_error_validacion(request: Request, exc: RequestValidationError):
 @app.get("/")
 def read_root():
     return {"message": "Stellar Classification API"}
+
+@app.get("/health")
+async def health():
+    """Devuelve el estado de los servicios del stack, para mostrar en el frontend"""
+    return await verificar_salud()
 
 @app.get("/modelos")
 def listar_modelos():
@@ -55,7 +61,7 @@ async def recibir_observacion(observacion: StellarObservation):
     """Recibe una observación nueva y predice su clase con el modelo en producción"""
     procesar_observacion(observacion)
     try:
-        clase = await predecir_clase(client, observacion)
+        resultado = await predecir_clase(client, observacion)
     except ModeloNoEncontradoError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ConexionMlflowError as e:
@@ -63,4 +69,8 @@ async def recibir_observacion(observacion: StellarObservation):
     except PrediccionError as e:
         raise HTTPException(status_code=502, detail=f"No se pudo generar la predicción: {e}")
 
-    return {"message": "Predicción generada", "clase": clase}
+    return {
+        "message": "Predicción generada",
+        "clase": resultado["clase"],
+        "probabilidades": resultado["probabilidades"],
+    }

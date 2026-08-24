@@ -1,8 +1,9 @@
 import asyncio
 
-import mlflow.pyfunc
+import mlflow.xgboost
 import pandas as pd
 from mlflow.exceptions import MlflowException
+from mlflow.models import get_model_info
 from mlflow.tracking import MlflowClient
 
 from mlflow_service import MODEL_NAME, obtener_modelo_produccion
@@ -28,18 +29,25 @@ def _construir_features(observacion: StellarObservation) -> pd.DataFrame:
     return pd.DataFrame([datos])
 
 
-def _cargar_y_predecir(version: str, observacion: StellarObservation) -> str:
-    modelo = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}/{version}")
-    prediccion = modelo.predict(_construir_features(observacion))
-    codigo = str(int(prediccion[0]))
+def _cargar_y_predecir(version: str, observacion: StellarObservation) -> dict:
+    model_uri = f"models:/{MODEL_NAME}/{version}"
+    modelo = mlflow.xgboost.load_model(model_uri)
+    probabilidades = modelo.predict_proba(_construir_features(observacion))[0]
 
-    metadata = modelo.metadata.metadata or {}
+    metadata = get_model_info(model_uri).metadata or {}
     mapeo = metadata.get("class_mapping", CLASE_POR_CODIGO_FALLBACK)
-    return mapeo.get(codigo, codigo)
+
+    probabilidades_por_clase = {
+        mapeo.get(str(int(codigo)), str(int(codigo))): float(prob)
+        for codigo, prob in zip(modelo.classes_, probabilidades)
+    }
+    clase_predicha = max(probabilidades_por_clase, key=probabilidades_por_clase.get)
+
+    return {"clase": clase_predicha, "probabilidades": probabilidades_por_clase}
 
 
-async def predecir_clase(client: MlflowClient, observacion: StellarObservation) -> str:
-    """Predice la clase del astro con el modelo en producción, sin bloquear el event loop"""
+async def predecir_clase(client: MlflowClient, observacion: StellarObservation) -> dict:
+    """Predice la clase del astro y sus probabilidades con el modelo en producción, sin bloquear el event loop"""
     modelo_info = await obtener_modelo_produccion(client)
     try:
         return await asyncio.to_thread(_cargar_y_predecir, modelo_info["version"], observacion)

@@ -4,6 +4,20 @@ import requests
 import streamlit as st
 
 API_URL = os.getenv("API_URL", "http://fastapi:8800")
+PUBLIC_HOST = os.getenv("PUBLIC_HOST", "localhost")
+
+ENLACES_SERVICIOS = {
+    "Airflow": f"http://{PUBLIC_HOST}:8080",
+    "MLflow": f"http://{PUBLIC_HOST}:5001",
+    "MinIO": f"http://{PUBLIC_HOST}:9001",
+    "API (docs)": f"http://{PUBLIC_HOST}:8800/docs",
+}
+ETIQUETAS_SALUD = {
+    "fastapi": "FastAPI",
+    "mlflow": "MLflow",
+    "airflow": "Airflow",
+    "minio": "MinIO",
+}
 
 st.title("Stellar Classification")
 
@@ -90,6 +104,13 @@ if enviado:
         if resp.ok:
             st.success(data.get("message", "Predicción generada"))
             st.metric("Clase predicha", data.get("clase", "-"))
+
+            probabilidades = data.get("probabilidades", {})
+            if probabilidades:
+                st.caption("Probabilidad por clase")
+                for clase, prob in sorted(probabilidades.items(), key=lambda item: -item[1]):
+                    st.write(f"{clase}: {prob:.1%}")
+                    st.progress(prob)
         elif "errores" in data:
             st.error(data.get("message", "Datos inválidos"))
             for error in data["errores"]:
@@ -98,3 +119,33 @@ if enviado:
             st.error(data.get("detail", "No se pudo generar la predicción"))
     except requests.RequestException as e:
         st.error(f"No se pudo conectar a la API: {e}")
+
+st.subheader("Estado de los servicios")
+
+st.caption("Accesos directos:")
+columnas_enlaces = st.columns(len(ENLACES_SERVICIOS))
+for columna, (nombre, url) in zip(columnas_enlaces, ENLACES_SERVICIOS.items()):
+    columna.link_button(nombre, url)
+
+
+@st.fragment(run_every=5)
+def mostrar_salud():
+    try:
+        resp = requests.get(f"{API_URL}/health", timeout=3)
+        estado = resp.json() if resp.ok else {}
+    except requests.RequestException:
+        estado = {}
+
+    columnas = st.columns(len(ETIQUETAS_SALUD))
+    for columna, (clave, etiqueta) in zip(columnas, ETIQUETAS_SALUD.items()):
+        saludable = estado.get(clave)
+        with columna:
+            if saludable:
+                st.success(etiqueta)
+            elif saludable is False:
+                st.error(etiqueta)
+            else:
+                st.warning(f"{etiqueta} (sin datos)")
+
+
+mostrar_salud()

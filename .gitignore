@@ -5,6 +5,9 @@
 
 logs/
 
+# MLflow tracking store local (se genera si corre sin MLFLOW_TRACKING_URI configurado)
+*.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
